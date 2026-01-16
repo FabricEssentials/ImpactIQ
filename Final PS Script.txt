@@ -1259,6 +1259,11 @@ if ($IncludeMyWorkspace -or ($selection -and $selection.TimedOut)) {
         if ($appReportIds.ContainsKey($report.id) -or $reportIds.ContainsKey($report.id) -or $originalReportObjectIds.ContainsKey($report.id)) {
             continue
         }
+        
+        # Skip reports with appId - these are shared via apps, not actually in My Workspace
+        if ($report.appId) {
+            continue
+        }
 
         if ($report.isOwnedByMe -eq $false) {
             $workspaceIdValue = "Shared Reports (No Workspace Access)"
@@ -1410,11 +1415,13 @@ foreach ($dataset in $datasetsInfo) {
             New-Item -ItemType Directory -Force -Path $modelBackupsPath | Out-Null
         }
 
-        # Construct the date model backup folder path and create it if it doesn't exist
+        # Construct the date model backup folder path (clear if it already exists)
         $folderPath = "$modelBackupsPath\$date"
-        if (-not (Test-Path $folderPath)) {
-            New-Item -ItemType Directory -Force -Path $folderPath | Out-Null
+        if (Test-Path $folderPath) {
+            Write-Host "[INFO] Clearing existing model backup folder for today: $folderPath"
+            Remove-Item -Path $folderPath -Recurse -Force -ErrorAction SilentlyContinue
         }
+        New-Item -ItemType Directory -Force -Path $folderPath | Out-Null
 
     # Check if the workspace is Premium or Fabric capacity before proceeding
     if ($workspace.WorkspaceIsOnDedicatedCapacity -eq $true) {
@@ -1489,11 +1496,13 @@ if (-not (Test-Path -Path $reportBackupsPath)) {
     New-Item -Path $reportBackupsPath -ItemType Directory -Force | Out-Null
 }
 
-# Create a new sub folder for the date
+# Create a new sub folder for the date (clear if it already exists)
 $newDateFolder = Join-Path -Path $reportBackupsPath -ChildPath $date
-if (-not (Test-Path -Path $newDateFolder)) {
-    New-Item -Path $newDateFolder -ItemType Directory -Force | Out-Null
+if (Test-Path -Path $newDateFolder) {
+    Write-Host "[INFO] Clearing existing report backup folder for today: $newDateFolder"
+    Remove-Item -Path $newDateFolder -Recurse -Force -ErrorAction SilentlyContinue
 }
+New-Item -Path $newDateFolder -ItemType Directory -Force | Out-Null
 
 # Define the temporary extraction folder
 $tempExtractFolder = "$baseFolderPath\Config\Temp"
@@ -2096,8 +2105,12 @@ if (-not (Test-Path -Path $dataflowBackupsPath)) {
 # Create a variable for end of week (Friday) date
 $date = (Get-Date -UFormat "%Y-%m-%d")
 
-# Create a new folder for the backups
+# Create a new folder for the backups (clear if it already exists)
 $dataflow_new_date_folder = Join-Path -Path $dataflowBackupsPath -ChildPath $date
+if (Test-Path -Path $dataflow_new_date_folder) {
+    Write-Host "[INFO] Clearing existing dataflow backup folder for today: $dataflow_new_date_folder"
+    Remove-Item -Path $dataflow_new_date_folder -Recurse -Force -ErrorAction SilentlyContinue
+}
 New-Item -Path $dataflow_new_date_folder -ItemType Directory -Force | Out-Null
 
 # Set the base output file path
