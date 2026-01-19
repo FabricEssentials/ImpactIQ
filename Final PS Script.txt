@@ -1,23 +1,27 @@
 # Define the base folder and script paths at the beginning of the script
 
+$global:BaseFolderPath = "C:\Power BI Backups"
+$global:ConfigFolder   = Join-Path $global:BaseFolderPath "Config"
 
-$baseFolderPath = "C:\Power BI Backups"
-$Script1Path = "$baseFolderPath\Config\Report Detail Extract Script-PBIR.csx"
-$Script2Path = "$baseFolderPath\Config\Report Detail Extract Script.csx"
-$Script3Path = "$baseFolderPath\Config\Model Detail Extract Script.csx"
-$Script4Path = "$baseFolderPath\Config\Measure Dependency Extract Script.csx"
-$TabularEditor2Path = "$baseFolderPath\Config\TabularEditor\TabularEditor.exe"
+$baseFolderPath = $global:BaseFolderPath
+$configFolder   = $global:ConfigFolder
+
+$Script1Path = Join-Path $configFolder "Report Detail Extract Script-PBIR.csx"
+$Script2Path = Join-Path $configFolder "Report Detail Extract Script.csx"
+$Script3Path = Join-Path $configFolder "Model Detail Extract Script.csx"
+$Script4Path = Join-Path $configFolder "Measure Dependency Extract Script.csx"
+$TabularEditor2Path = Join-Path (Join-Path $configFolder "TabularEditor") "TabularEditor.exe"
 
 # =============================
 # Config
 # =============================
-$baseFolderPath = "C:\Power BI Backups"
-$configFolder   = Join-Path $baseFolderPath "Config"
 
 # Ensure Config exists
 if (-not (Test-Path $configFolder)) {
     New-Item -Path $configFolder -ItemType Directory -Force | Out-Null
 }
+
+$global:TokenFilePath = Join-Path $configFolder "PowerBI_TempAccessToken.txt"
 
 $ErrorActionPreference="SilentlyContinue"; $WarningPreference="SilentlyContinue"
 
@@ -397,8 +401,7 @@ function Connect-PowerBI {
 
     $global:accessTokenObject = Get-PowerBIAccessToken
     $global:accessToken = $accessTokenObject.Authorization -replace 'Bearer ', ''
-    # Write the access token to a temporary file
-    Set-Content -Path $env:TEMP\PowerBI_AccessToken.txt -Value $global:accessToken
+    Set-Content -Path $global:TokenFilePath -Value $global:accessToken
 }
 
 # Track script start time
@@ -418,14 +421,24 @@ catch {
 # Start a background job that refreshes the token. Pass the environment so child job can reconnect correctly.
 function Start-TokenRefreshJob {
     param(
-        [string]$Environment
+        [string]$Environment,
+        [string]$BaseFolderPath
     )
 
     $jobScript = {
-        param($EnvArg)
+        param($EnvArg, $BaseFolderPathArg)
+
+        $tokenDirectory = Join-Path -Path $BaseFolderPathArg -ChildPath 'Config'
+        if (-not (Test-Path -Path $tokenDirectory)) {
+            New-Item -Path $tokenDirectory -ItemType Directory -Force | Out-Null
+        }
+        $tokenFilePath = Join-Path -Path $tokenDirectory -ChildPath 'PowerBI_TempAccessToken.txt'
 
         function Connect-PowerBI {
-            param([string]$Environment)
+            param(
+                [string]$Environment,
+                [string]$TokenFilePath
+            )
 
             if ($Environment) {
                 Connect-PowerBIServiceAccount -Environment $Environment | Out-Null
@@ -434,26 +447,25 @@ function Start-TokenRefreshJob {
             }
             $global:accessTokenObject = Get-PowerBIAccessToken
             $global:accessToken = $accessTokenObject.Authorization -replace 'Bearer ', ''
-            # Write the access token to a temporary file
-            Set-Content -Path $env:TEMP\PowerBI_AccessToken.txt -Value $global:accessToken
+            Set-Content -Path $TokenFilePath -Value $global:accessToken
         }
 
         while ($true) {
             Start-Sleep -Seconds 3300  # Sleep for 55 minutes
-            Connect-PowerBI -Environment $EnvArg
+            Connect-PowerBI -Environment $EnvArg -TokenFilePath $tokenFilePath
         }
     }
 
     # Start the job and pass the environment as an argument
-    Start-Job -ScriptBlock $jobScript -Name "TokenRefreshJob" -ArgumentList $Environment | Out-Null
+    Start-Job -ScriptBlock $jobScript -Name "TokenRefreshJob" -ArgumentList $Environment, $BaseFolderPath | Out-Null
 }
 
 # Start the background job to refresh the token
-Start-TokenRefreshJob -Environment $LoginEnvironment
+Start-TokenRefreshJob -Environment $LoginEnvironment -BaseFolderPath $global:BaseFolderPath
 
 # Function to get the current access token
 function Get-CurrentAccessToken {
-    $global:accessToken = Get-Content -Path $env:TEMP\PowerBI_AccessToken.txt
+    $global:accessToken = Get-Content -Path $global:TokenFilePath
     return $global:accessToken
 }
 
@@ -2414,6 +2426,10 @@ Write-Output "Dataflow Backup and Detail Extraction Process Completed. Excel out
 # Stop the background job after script completion
 Stop-Job -Name "TokenRefreshJob"
 Remove-Job -Name "TokenRefreshJob"
+
+if (Test-Path -Path $global:TokenFilePath) {
+    Remove-Item -Path $global:TokenFilePath -Force
+}
 
 Write-Output "All Excel files processed and combined successfully."
 
